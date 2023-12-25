@@ -40,8 +40,8 @@ const userSchema= new mongoose.Schema({
     },
     role: {
         type: [String],
-        enum: ['taskManager','taskCreator'],
-        default: ['taskCreator']
+        enum: ['taskManager','taskWorker'],
+        default: ['taskWorker']
     },
 }, {timestamps:true});
 

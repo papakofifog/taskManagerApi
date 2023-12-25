@@ -1,4 +1,4 @@
-const {createNewTask,getAllUserTasks,getOneUserTask,updateOneTask, updateTaskStatus, deleteTask, filterUserTaskPerCriteria}=require('../Module/taskModule');
+const {createNewTask,getAllUserTasks,getOneUserTask,updateOneTask, updateTaskStatus, deleteTask, filterUserTaskPerCriteria, assignTaskTo, getAllTasks}=require('../Module/taskModule');
 const { successMessage, successMessageWithData, ErrorMeessage } = require('../util/manageResponses');
 const {checkIfUserExists}= require('../Module/userModule')
 
@@ -48,19 +48,23 @@ async function handleUpdateOneUserTask(req, res, next){
     try{
         let existingUserId=await checkIfUserExists(req.body['id']);
         if(existingUserId === null) return res.json(ErrorMeessage("User does not exist"));
-        let existingUserTask= await getOneUserTask(req.body.id);
-        if(updateOneTask(req.body, next)) return res.json(successMessageWithData("Task updated", existingUserTask));
+        let existingUserTask= await getOneUserTask(req.body.id, next);
+        req.body.taskId=req.params.taskId;
+        let userTask= await updateOneTask(req.body, next);
+        if(userTask) return res.json(successMessageWithData("Task updated", existingUserTask));
         return res.status(400).json(ErrorMeessage("Task updated failed"));
     }catch(e){
         return next(e);
     }
 }
 
-async function handleUpdateTaskStatus(){
+async function handleUpdateTaskStatus(req, res, next){
     try{
         let existingUserId=await checkIfUserExists(req.body['id']);
         if(existingUserId === null) return res.json(ErrorMeessage("User does not exist"));
-        if(updateTaskStatus(req.body, next))return res.json(successMessageWithData("Task status updated", updateOneTask));
+        req.body.taskId=req.params.taskId;
+        let isTaskUpdated= await updateTaskStatus(req.body,next);
+        if(isTaskUpdated)return res.json(successMessageWithData("Task status updated", updateOneTask));
         return res.status(400).json(ErrorMeessage("Task status updated failed"));
     }catch(e){
         return next(e);
@@ -73,7 +77,9 @@ async function handleDeleteTask(req,res, next){
     try{
         let existingUserId=await checkIfUserExists(req.body['id']);
         if(existingUserId === null) return res.json(ErrorMeessage("User does not exist"));
-        if(deleteTask(req.body,next)) return res.status(400).json(successMessage("Task deleted"));
+        let isTaskDeleted= await deleteTask(req.params.taskId,next);
+        console.log( isTaskDeleted);
+        if(isTaskDeleted) return res.status(200).json(successMessage("Task deleted"));
         return res.status(400).json(ErrorMeessage("Task deletion failed."));
     }catch(e){
         return next(e);
@@ -92,5 +98,32 @@ async function handleFilterUserTaskPerCriteria(req, res, next){
 }
 
 
+async function handleAssignToUser(req,res,next){
+    try{
+        let existingUserId=await checkIfUserExists(req.body['id']);
+        if(existingUserId === null) return res.json(ErrorMeessage("User does not exist"));
+        let taskToAssign={"taskId":req.params.taskId,userAssignedTo: req.body.assignTaskTo }
+        let isTaskAssigned=await assignTaskTo(taskToAssign, next);
+        if(isTaskAssigned) return res.json(successMessage("Task Assigned successfully"));
+        return res.json(ErrorMeessage("Failed to assign task to user"));
+    }catch(e){
+        return next(e);
+    }
+}
 
-module.exports={handleCreateTask, retrieveAllUserTasks, retrievOneUserTask, handleUpdateOneUserTask, handleUpdateTaskStatus, handleDeleteTask, handleFilterUserTaskPerCriteria};
+async function handleRetriveAllTasks(req, res, next){
+    try{
+        let existingUserId=await checkIfUserExists(req.body['id']);
+        if(existingUserId === null) return res.json(ErrorMeessage("User does not exist"));
+        const { startIndex, endIndex} = req.pagination;
+        let allTasks= await getAllTasks(next);
+        if(allTasks) return res.json(successMessageWithData("Tasks are", {paginatedData:allTasks.slice(startIndex,endIndex), total: allTasks.length }));
+        return res.json(ErrorMeessage("Cannot fetch all tasks at moment, kindly contact the taskApp team"));
+    }catch(e){
+        return next(e);
+    }
+}
+
+
+
+module.exports={handleCreateTask, retrieveAllUserTasks, retrievOneUserTask, handleUpdateOneUserTask, handleUpdateTaskStatus, handleDeleteTask, handleFilterUserTaskPerCriteria, handleAssignToUser, handleRetriveAllTasks};

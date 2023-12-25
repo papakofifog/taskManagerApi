@@ -4,7 +4,8 @@
   "description": "A task manager rest api that provides endpoint to a task manager client app to manage users tasks",
   "main": "server.js",
   "scripts": {
-    "start": "nodemon server.js"
+    "start": "nodemon server.js",
+    "test": "jest"
   },
   "author": "Kofi Atah Asante",
   "license": "ISC",

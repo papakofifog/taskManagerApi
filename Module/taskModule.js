@@ -3,7 +3,7 @@ const mongoosePaginate= require('mongoose-paginate');
 
 
 const taskSchema= new mongoose.Schema({
-    userId:{
+    createdBy:{
         type: mongoose.Types.ObjectId,
         ref: 'User',
         required:(true, "user reference is required")
@@ -18,8 +18,13 @@ const taskSchema= new mongoose.Schema({
     },
     dueDate:Date,
     status: {
-        type: String,
+        type: [String],
         enum:['PENDING','INPROGRESS', 'COMPLETED']
+    },
+    assignedTo:{
+        type: String,
+        ref: 'User',
+        default: ''
     }
 }, {timestamps:true})
 
@@ -31,11 +36,12 @@ const taskModel= mongoose.model('taskModel', taskSchema);
 const createNewTask = async (newTask, next)=>{
     try{
         let expectedTask={
-            "userId":newTask.id,
+            "createdBy":newTask.id,
             "title":newTask.title,
             "description": newTask.description,
             "dueDate": newTask.dueDate,
-            "status":newTask.status
+            "status":newTask.status,
+            "role": newTask?.role||"",
         }
         let newTaskDocument= new taskModel({
             ...expectedTask
@@ -49,8 +55,17 @@ const createNewTask = async (newTask, next)=>{
 
 const getAllUserTasks = async (userId, next) =>{
     try{
-        let usersTasks= await taskModel.find({userId: userId}).sort('-createdAt');
+        let usersTasks= await taskModel.find({createdBy: userId}).sort('-createdAt');
         return usersTasks;
+    }catch(e){
+        next(e);
+    }
+}
+
+const getAllTasks = async (next)=>{
+    try{
+        let allTasks= await taskModel.find().sort('-createdAt');
+        return allTasks;
     }catch(e){
         next(e);
     }
@@ -68,14 +83,15 @@ const getOneUserTask = async (taskId, next) =>{
 
 const updateOneTask= async (task, next) =>{
     try{
-        let {id, title, description, dueDate, status }= task;
-        let userTask= await taskModel.updateOne({_id:id}, {
+        let {taskId, title, description, dueDate, status }= task;
+        let userTask= await taskModel.updateOne({_id:taskId}, {
             title: title,
             decription:description,
             dueDate: dueDate,
-            status: status
+            status: status,
         });
-        return userTask.acknowledged;
+        console.log(userTask.matchedCount)
+        return userTask.modifiedCount;
     }catch(e){
         next(e);
     }
@@ -83,18 +99,19 @@ const updateOneTask= async (task, next) =>{
 
 const updateTaskStatus=async (task, next)=>{
     try{
-        let {id, taskStatus }= task;
-        let userTask= await taskModel.updateOne({_id:id}, {
-            status: taskStatus
+        let {taskId, status }= task;
+        console.log(task)
+        let userTask= await taskModel.updateOne({_id:taskId}, {
+            status: status
         });
-        return userTask.acknowledged;
+        return userTask.modifiedCount;
     }catch(e){next(e)}
 }
 
 const deleteTask = async (taskId, next)=> {
     try{
         let userTask= await taskModel.deleteOne({_id:taskId});
-        return userTask.acknowledged;
+        return userTask.deletedCount;
     }catch(e){next(e)}
 }
 
@@ -107,7 +124,30 @@ const filterUserTaskPerCriteria = async (userId, filterStatus, filterDueDate, ne
     }
 }
 
-module.exports= {createNewTask,getAllUserTasks,getOneUserTask,updateOneTask, updateTaskStatus, deleteTask, filterUserTaskPerCriteria}
+const assignTaskTo= async (data, next)=>{
+    try{
+        let {taskId,userAssignedTo }= data;
+        let userTask= await taskModel.updateOne({_id:taskId}, {
+            assignTaskTo: userAssignedTo
+        });
+        return userTask.acknowledged();
+    }catch(e){
+        return next(e);
+    }
+}
+
+
+
+module.exports= {createNewTask,
+    getAllUserTasks,
+    getOneUserTask,
+    updateOneTask,
+    updateTaskStatus,
+    deleteTask,
+    filterUserTaskPerCriteria,
+    assignTaskTo,
+    getAllTasks
+}
 
 
 

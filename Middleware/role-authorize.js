@@ -1,33 +1,40 @@
 const { ErrorMeessage } = require("../util/manageResponses");
 
-const restrict = (...role)=>{
+const restrict = (req,res,next)=>{
     try{
-        return (req, res,next)=>{
-            console.log(req.user)
-            const userRoles = req.user.userRole;
-            if(!userRoles.some((r)=> role.includes(r))){
-                return res.status(401).json(ErrorMeessage("User not authorized"));
-            }
-            next();
-        };
+        const userRoles = req.user.userRole;
+            
+        if(!userRoles.some((r)=> req.user.expectedUser.includes(r))){
+            return res.status(401).json(ErrorMeessage("User not authorized"));
+        }
+        return next();
     }catch(e){
         return next(e);
     }
 };
 
-function restrictToTaskCreator(req, res, next){
-    restrict(['taskCreator']);
-    next();
+function restrictToTaskWorker(req, res, next){
+    req.user={
+        ...req.user,expectedUser: ['taskWorker']
+    }
+    return restrict(req,res,next);
+    
 }
 
 function restrictToTaskManager(req, res, next){
-    restrict(['taskManager']);
-    next();
+    req.user={
+        ...req.user,expectedUser: ['taskManager']
+    }
+    return restrict(req,res,next);
+    
 }
 
-function restrictToTaskManagerAndCreator(req,res, next){
-    restrict(['taskCreator','taskManager']);
-    next()
+function restrictToTaskManagerAndWorker(req,res, next){
+    req.user={
+        ...req.user,expectedUser: ['taskManager','taskWorker']
+    }
+    return restrict(req,res,next);
+    
 }
 
-module.exports= {restrictToTaskCreator,restrictToTaskManager,restrictToTaskManagerAndCreator}
+module.exports= {restrictToTaskWorker,restrictToTaskManager,restrictToTaskManagerAndWorker}

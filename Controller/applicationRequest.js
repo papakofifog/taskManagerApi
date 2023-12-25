@@ -1,7 +1,7 @@
 //const passport= require('../Middleware/passport')
 require('dotenv').config();
 const {createAUser, getOneUser, findOneUser, checkRegisterDataformat, checkLoginDataformat, checkIfUserExists}= require('../Module/userModule');
-const {encryptPassword, verifyPassword}= require("../Middleware/encryptPassword");
+const {encryptPassword, verifyPassword}= require("../util/encryptPassword");
 const {createToken, createRefreshToken}= require('../Middleware/JWT');
 const {successMessage,successMessageWithData,failureMessage,failureMessageWithData, ErrorMeessage,loginSuccessMessage}= require("../util/manageResponses")
 

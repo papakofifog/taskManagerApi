@@ -1,4 +1,4 @@
-const {getOneUser,updateUsername}= require('../Module/userModule');
+const {getOneUser,updateUsername, getAllUsers}= require('../Module/userModule');
 const {successMessageWithData} = require("../util/manageResponses");
 
 
@@ -26,7 +26,20 @@ async function updateActiveUser(req, res, next){
     }
 }
 
-module.exports= {getActiveUser, updateActiveUser}
+
+async function handleGetAllUsers(req, res, next){
+    try{
+        let {startIndex, endIndex}= req.pagination;
+        let users=await getAllUsers(next);
+        if(users)return res.json(successMessageWithData("All users are", {paginatedData:users.slice(startIndex,endIndex), total:users.length}))
+        return users;
+    }catch(e){
+        return next(e);
+    }
+    
+}
+
+module.exports= {getActiveUser, updateActiveUser, handleGetAllUsers}
 
 
 

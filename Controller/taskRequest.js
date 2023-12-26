@@ -90,7 +90,9 @@ async function handleFilterUserTaskPerCriteria(req, res, next){
     try{
         let existingUserId=await checkIfUserExists(req.body['id']);
         if(existingUserId === null) return res.json(ErrorMeessage("User does not exist"));
-        let filteredUserTasks= await filterUserTaskPerCriteria(req.body['id'], req.body.filterStatus, req.body.filterDueDate, next);
+        console.log(req.body)
+        let filteredUserTasks= await filterUserTaskPerCriteria(req.body['id'], req.body.status, req.body.dueDate, next);
+        if(filteredUserTasks == null) return res.json(ErrorMeessage("Failed to featch filtered user tasks"));
         return res.status(200).json(successMessageWithData("filtered User tasks",filteredUserTasks));
     }catch(e){
         return next(e);
@@ -102,7 +104,7 @@ async function handleAssignToUser(req,res,next){
     try{
         let existingUserId=await checkIfUserExists(req.body['id']);
         if(existingUserId === null) return res.json(ErrorMeessage("User does not exist"));
-        let taskToAssign={"taskId":req.params.taskId,userAssignedTo: req.body.assignTaskTo }
+        let taskToAssign={"taskId":req.params.taskId,userAssignedTo: req.body.userAssignedTo }
         let isTaskAssigned=await assignTaskTo(taskToAssign, next);
         if(isTaskAssigned) return res.json(successMessage("Task Assigned successfully"));
         return res.json(ErrorMeessage("Failed to assign task to user"));

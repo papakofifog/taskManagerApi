@@ -91,6 +91,15 @@ async function updateUsername(data, next){
     }
 }
 
+async function getAllUsers(data, next){
+    try{
+        let users= await UserModel.find().sort('-createdAt');
+        return users;
+    }catch(e){
+        return next(e)
+    }
+}
+
 function hasSameProps(obj1,obj2){
     return Object.keys(obj1).every(function (prop ){
         return obj2.hasOwnProperty(prop);
@@ -148,5 +157,5 @@ async function checkIfUserExists(userId){
 
 
 
-module.exports={createAUser,getOneUser, findOneUser, checkRegisterDataformat, checkLoginDataformat, updateUsername,checkIfUserExists}
+module.exports={createAUser,getOneUser, findOneUser,getAllUsers, checkRegisterDataformat, checkLoginDataformat, updateUsername,checkIfUserExists}
 

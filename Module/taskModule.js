@@ -117,8 +117,9 @@ const deleteTask = async (taskId, next)=> {
 
 const filterUserTaskPerCriteria = async (userId, filterStatus, filterDueDate, next)=>{
     try{
-        let tasks= await taskModel.find({_id:userId}, {status:filterStatus, dueDate:filterDueDate}).sort('-createdAt');
+        let tasks= await taskModel.find({createdBy:userId}, {status:filterStatus, dueDate:filterDueDate}).select('title, description,dueDate,status').sort('-createdAt');
         return tasks;
+        
     }catch(e){
         next(e);
     }
@@ -128,9 +129,9 @@ const assignTaskTo= async (data, next)=>{
     try{
         let {taskId,userAssignedTo }= data;
         let userTask= await taskModel.updateOne({_id:taskId}, {
-            assignTaskTo: userAssignedTo
+            "assignedTo": userAssignedTo
         });
-        return userTask.acknowledged();
+        return userTask.modifiedCount;
     }catch(e){
         return next(e);
     }

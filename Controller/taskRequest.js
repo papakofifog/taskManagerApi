@@ -90,7 +90,6 @@ async function handleFilterUserTaskPerCriteria(req, res, next){
     try{
         let existingUserId=await checkIfUserExists(req.body['id']);
         if(existingUserId === null) return res.json(ErrorMeessage("User does not exist"));
-        console.log(req.body)
         let filteredUserTasks= await filterUserTaskPerCriteria(req.body['id'], req.body.status, req.body.dueDate, next);
         if(filteredUserTasks == null) return res.json(ErrorMeessage("Failed to featch filtered user tasks"));
         return res.status(200).json(successMessageWithData("filtered User tasks",filteredUserTasks));

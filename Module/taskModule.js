@@ -19,7 +19,8 @@ const taskSchema= new mongoose.Schema({
     dueDate:Date,
     status: {
         type: [String],
-        enum:['PENDING','INPROGRESS', 'COMPLETED']
+        enum:['PENDING','INPROGRESS', 'COMPLETED'],
+        default: ['PENDING']
     },
     assignedTo:{
         type: String,
@@ -117,7 +118,14 @@ const deleteTask = async (taskId, next)=> {
 
 const filterUserTaskPerCriteria = async (userId, filterStatus, filterDueDate, next)=>{
     try{
-        let tasks= await taskModel.find({createdBy:userId}, {status:filterStatus, dueDate:filterDueDate}).select('title, description,dueDate,status').sort('-createdAt');
+        let tasks=[];
+        if(filterStatus ==="" && filterDueDate===""){
+            tasks= taskModel.find().select('title description dueDate status').sort('-createdAt');
+        }else if(filterStatus!="" && filterDueDate!="" ){
+            tasks= taskModel.find({status:filterStatus} && {dueDate:filterDueDate}).select('title description dueDate status').sort('-createdAt');
+        }else if(filterStatus!="" || filterDueDate!="" ){
+            tasks= taskModel.find({status:filterStatus} || {dueDate:filterDueDate}).select('title description dueDate status').sort('-createdAt');
+        }
         return tasks;
         
     }catch(e){

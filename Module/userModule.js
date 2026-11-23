@@ -1,161 +1,136 @@
-const e = require('express');
-const mongoose= require('mongoose');
-const {validateFieldNotNull, noNullKeyValues}= require('../util/validations/validateModel')
+const { db, newId, now, validationError } = require('../Settings/database');
+const { validateFieldNotNull, noNullKeyValues } = require('../util/validations/validateModel');
 
-const userSchema= new mongoose.Schema({
-    username: {
-        type:String,
-        trum:true,
-        min: [5, 'Username should be at least 5 characters long, but git {VALUE}'],
-        unique: true,
-        validate:{
-            validator: (value)=> validateFieldNotNull(value),
-            message: "Username is required"
+const ROLES = ['taskManager', 'taskWorker'];
+const EMAIL_REGEX = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
+const PASSWORD_REGEX = /^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*()_+{}|:"<>?`~\-=\[\];',./]).{8,}$/;
+
+const isBlank = (value) => typeof value !== 'string' || !validateFieldNotNull(value);
+
+// Turns a DB row into the same shape the API returned with Mongoose.
+function toUser(row) {
+    if (!row) return null;
+    return { ...row, role: JSON.parse(row.role), __v: 0 };
+}
+
+function toPublicUser(row) {
+    if (!row) return null;
+    const { _id, username, email, role } = row;
+    return { _id, username, email, role: JSON.parse(role) };
+}
+
+function normaliseRole(role) {
+    if (role === undefined || role === null || role === '') return ['taskWorker'];
+    return Array.isArray(role) ? role : [role];
+}
+
+function validateUser(user) {
+    const errors = {};
+    if (isBlank(user.username)) errors.username = 'Username is required';
+
+    if (isBlank(user.email)) errors.email = 'Email is required';
+    else if (!EMAIL_REGEX.test(user.email)) errors.email = 'Email provided is invalid';
+
+    if (isBlank(user.password)) errors.password = 'Password is required';
+    else if (user.password.length < 8) errors.password = 'Password should be at least 8 characters long';
+    else if (!PASSWORD_REGEX.test(user.password)) errors.password = 'Password must meet specified criteria';
+
+    const invalidRole = user.role.find((r) => !ROLES.includes(r));
+    if (invalidRole !== undefined) errors.role = `\`${invalidRole}\` is not a valid enum value for path \`role\`.`;
+
+    if (Object.keys(errors).length) throw validationError(errors);
+}
+
+async function createAUser(user, next) {
+    try {
+        const timestamp = now();
+        const newUser = {
+            _id: newId(),
+            username: user.username,
+            email: typeof user.email === 'string' ? user.email.trim().toLowerCase() : user.email,
+            password: user.password,
+            role: normaliseRole(user.role),
+            createdAt: timestamp,
+            updatedAt: timestamp,
+        };
+        validateUser(newUser);
+
+        db.prepare(`
+            INSERT INTO users (_id, username, email, password, role, createdAt, updatedAt)
+            VALUES (@_id, @username, @email, @password, @role, @createdAt, @updatedAt)
+        `).run({ ...newUser, role: JSON.stringify(newUser.role) });
+
+        return { ...newUser, __v: 0 };
+    } catch (e) { next(e) }
+}
+
+async function getOneUser(userId, next) {
+    try {
+        const row = db.prepare('SELECT * FROM users WHERE _id = ?').get(String(userId));
+        return toPublicUser(row);
+    } catch (e) { next(e) };
+}
+
+async function findOneUser(userEmail, next) {
+    try {
+        if (typeof userEmail !== 'string') return null;
+        const row = db.prepare('SELECT * FROM users WHERE email = ?').get(userEmail.trim().toLowerCase());
+        return toUser(row);
+    } catch (e) { next(e) };
+}
+
+async function updateUsername(data, next) {
+    try {
+        const { username, id } = data;
+        if (username !== undefined) {
+            if (isBlank(username)) throw validationError({ username: 'Username is required' });
+            db.prepare('UPDATE users SET username = ?, updatedAt = ? WHERE _id = ?').run(username, now(), String(id));
         }
-    },
-    email: {
-        type: String,
-        trim:true,
-        lowercase:true,
-        unique: true,
-        match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Email provided is invalid'],
-        validate:{
-            validator: (value)=> validateFieldNotNull(value),
-            message: "Email is required"
-        }
-    },
-    pitureUrl:String,
-    password:{
-        
-        type: String,
-        minlength: [8, 'Password should be at least 8 characters long'],
-        validate:{
-            validator: (value)=> validateFieldNotNull(value),
-            message: "Password is required"
-        },
-        match: [
-            /^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*()_+{}|:"<>?`~\-=\[\];',./]).{8,}$/,
-            'Password must meet specified criteria'
-        ]
-    },
-    role: {
-        type: [String],
-        enum: ['taskManager','taskWorker'],
-        default: ['taskWorker']
-    },
-}, {timestamps:true});
-
-
-const UserModel= mongoose.model('User', userSchema);
-
-
-
-
-
-async function createAUser(user,next){
-    try{
-        let newUser= new UserModel({
-            pictureUrl:"",...user
-        });
-        let newUserDocument=await newUser.save();
-        return newUserDocument;
-    }catch(e){next(e)}
-}
-
-async function getOneUser(userId, next){
-    try{
-        let user= UserModel.findById({_id:userId}).select('-password -createdAt -updatedAt -__v');
-        return user;
-    }catch(e){next(e)};
-}
-
-async function findOneUser(userEmail, next){
-    try{
-        let existingUser= await UserModel.findOne({email:userEmail});
-        return existingUser;
-    }catch(e){next(e)};
-}
-
-
-
-async function updateUsername(data, next){
-    try{
-        let {username, id}= data;
-        let updateUserDocument= await UserModel.updateOne({_id:id}, {
-            username: username
-        })
-        
-        return updateUserDocument.acknowledged;
-    }catch(e){
-         next(e);
+        return true;
+    } catch (e) {
+        next(e);
     }
 }
 
-async function getAllUsers(data, next){
-    try{
-        let users= await UserModel.find().sort('-createdAt');
-        return users;
-    }catch(e){
+async function getAllUsers(data, next) {
+    try {
+        const rows = db.prepare('SELECT * FROM users ORDER BY createdAt DESC, rowid DESC').all();
+        return rows.map(toUser);
+    } catch (e) {
         return next(e)
     }
 }
 
-function hasSameProps(obj1,obj2){
-    return Object.keys(obj1).every(function (prop ){
+function hasSameProps(obj1, obj2) {
+    return Object.keys(obj1).every(function (prop) {
         return obj2.hasOwnProperty(prop);
     })
 }
 
-function checkRegisterDataformat(data,next){
-    try{
-
-        if(!(noNullKeyValues(data))) return false;
-        let idealStructure= new Object({
-            username: {
-                type:String,
-                required: (true, "username is required"),
-                min: [5, 'Username should be at least 5 characters long, but git {VALUE}'],
-                unique: true
-            },
-            email: {
-                type: String,
-                trim:true,
-                lowercase:true,
-                unique:true,
-                required:'Email address is required',
-                match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Please fill a valid email address']
-            },
-            password:String,
-        
-        });
-        
-        return hasSameProps(idealStructure,data)
-    }catch(e){
+function checkRegisterDataformat(data, next) {
+    try {
+        if (!(noNullKeyValues(data))) return false;
+        const idealStructure = { username: String, email: String, password: String };
+        return hasSameProps(idealStructure, data)
+    } catch (e) {
         next(e);
     }
-    
 }
 
-function checkLoginDataformat(data, next){
-    try{
-        if(!(noNullKeyValues(data))) return false;
-        let idealStructure= new Object({
-            email:String,
-            password:String,
-        })
-        return hasSameProps(idealStructure,data)
-    }catch(e){
+function checkLoginDataformat(data, next) {
+    try {
+        if (!(noNullKeyValues(data))) return false;
+        const idealStructure = { email: String, password: String };
+        return hasSameProps(idealStructure, data)
+    } catch (e) {
         next(e);
     }
-
 }
 
-async function checkIfUserExists(userId){
-    let user= await UserModel.exists({_id:userId});
-    return user;
+// Returns { _id } when the user exists, otherwise null (callers compare against null).
+async function checkIfUserExists(userId) {
+    const row = db.prepare('SELECT _id FROM users WHERE _id = ?').get(String(userId));
+    return row || null;
 }
 
-
-
-module.exports={createAUser,getOneUser, findOneUser,getAllUsers, checkRegisterDataformat, checkLoginDataformat, updateUsername,checkIfUserExists}
-
+module.exports = { createAUser, getOneUser, findOneUser, getAllUsers, checkRegisterDataformat, checkLoginDataformat, updateUsername, checkIfUserExists }

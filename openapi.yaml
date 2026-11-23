@@ -19,12 +19,14 @@ info:
     - `SimpleError`: `{ "errors": "<string>" }`. Note that some of these are returned with HTTP **200**.
     - `FieldErrorList`: `{ "errors": [ { "message": "..." } ] }`.
     - `ValidationErrorResponse`: `{ "data": { "errors": [ { "message": "..." } ] } }`. This comes from the global
-      error handler (Mongoose validation, duplicate keys, invalid/expired JWT, bad ObjectId) and is always HTTP 400.
+      error handler (field validation, duplicate keys, invalid/expired JWT) and is always HTTP 400.
   license:
     name: ISC
     identifier: ISC
 
 servers:
+  - url: https://taskmanager-api-ri3c.onrender.com/_taskApp/v1
+    description: Render test server (free tier; SQLite data is wiped on restart/redeploy, first request after ~15 min idle takes 30-60s)
   - url: http://localhost:{port}/_taskApp/v1
     description: Local server (port comes from the PORT env variable)
     variables:
@@ -305,8 +307,7 @@ paths:
       description: |
         Roles: `taskManager`, `taskWorker`. `data` is `null` if no task has this id.
 
-        Note: a `taskId` that is not a valid ObjectId returns 400 from the error handler, but the controller then
-        tries to respond a second time (`ERR_HTTP_HEADERS_SENT`), which can reset a kept-alive connection.
+        `data` is also `null` for a `taskId` that is not a valid id.
       parameters:
         - $ref: '#/components/parameters/TaskId'
       responses:
@@ -433,7 +434,7 @@ paths:
                               - type: 'null'
                   - $ref: '#/components/schemas/SimpleError'
         '400':
-          description: No task with this id, or a validation error (e.g. invalid ObjectId)
+          description: No task with this id, or a validation error (e.g. invalid status)
           content:
             application/json:
               schema:
@@ -474,7 +475,7 @@ paths:
               example:
                 message: Task status updated
         '400':
-          description: No task with this id, or a validation error (e.g. invalid ObjectId)
+          description: No task with this id, or a validation error (e.g. invalid status)
           content:
             application/json:
               schema:
@@ -570,7 +571,7 @@ components:
       name: taskId
       in: path
       required: true
-      description: MongoDB ObjectId of the task
+      description: Id of the task (24-character hex string)
       schema:
         $ref: '#/components/schemas/ObjectId'
     Page:
@@ -595,8 +596,8 @@ components:
   responses:
     ValidationError:
       description: |
-        Error from the global error handler: Mongoose validation error, duplicate key
-        (e.g. "email already taken"), invalid or expired JWT, or invalid ObjectId.
+        Error from the global error handler: field validation error, duplicate key
+        (e.g. "email already taken"), or invalid or expired JWT.
         For errors that are not validation or duplicate-key errors, `errors` is an empty array.
       content:
         application/json:
@@ -658,7 +659,7 @@ components:
           minLength: 8
           description: |
             Intended rule: at least 8 characters with a digit, a lower-case letter, an upper-case letter and a special character.
-            Not enforced at the moment: the password is hashed before Mongoose validates it, so the rule is checked against the bcrypt hash and any password is accepted.
+            Not enforced at the moment: the password is hashed before it is validated, so the rule is checked against the bcrypt hash and any password is accepted.
           example: Passw0rd!
         role:
           type: array

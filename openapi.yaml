@@ -1,0 +1,921 @@
+openapi: 3.1.0
+info:
+  title: Task Manager API
+  version: 1.0.0
+  description: |
+    REST API that lets a task manager client app manage users and their tasks.
+
+    **Base path:** every route is mounted under `/_taskApp/v1` (see `server.js`).
+
+    **Authentication:** protected routes expect `Authorization: Bearer <accessToken>`.
+    The access token (valid 5h) and refresh token (valid 7h) are returned by `POST /login`.
+    The signed-in user's id is taken from the token, so clients never send their own `id`.
+
+    **Roles:** a user has one or more of `taskManager` and `taskWorker` (default: `taskWorker`).
+    Each operation lists the roles it allows. A user without an allowed role gets `401 User not authorized`.
+
+    **Response shapes:** the code uses several error formats. They are modelled as separate schemas:
+    - `MessageResponse` / `DataResponse`: success.
+    - `SimpleError`: `{ "errors": "<string>" }`. Note that some of these are returned with HTTP **200**.
+    - `FieldErrorList`: `{ "errors": [ { "message": "..." } ] }`.
+    - `ValidationErrorResponse`: `{ "data": { "errors": [ { "message": "..." } ] } }`. This comes from the global
+      error handler (Mongoose validation, duplicate keys, invalid/expired JWT, bad ObjectId) and is always HTTP 400.
+  license:
+    name: ISC
+    identifier: ISC
+
+servers:
+  - url: http://localhost:{port}/_taskApp/v1
+    description: Local server (port comes from the PORT env variable)
+    variables:
+      port:
+        default: "3000"
+
+tags:
+  - name: Auth
+    description: Registration, login and token refresh
+  - name: Users
+    description: The signed-in user and the user list
+  - name: Tasks
+    description: Task creation, retrieval, update, assignment and deletion
+
+security:
+  - bearerAuth: []
+
+paths:
+  /register:
+    post:
+      tags: [Auth]
+      operationId: registerUser
+      summary: Register a new user
+      description: |
+        Creates a new user. `username`, `email` and `password` must all be present and not null.
+        The password is hashed with bcrypt before it is stored.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: |
+            Either the user was registered (`MessageResponse`) or a required field was missing (`FieldErrorList`, "All fields required").
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/MessageResponse'
+                  - $ref: '#/components/schemas/FieldErrorList'
+              examples:
+                registered:
+                  value: { message: User registered Successfully }
+                missingFields:
+                  value: { errors: [ { message: All fields required } ] }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /login:
+    post:
+      tags: [Auth]
+      operationId: loginUser
+      summary: Log in and receive JWTs
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Wrong password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FieldErrorList'
+              example:
+                errors: [ { message: Invalid User name or password } ]
+        '401':
+          description: No user with this email
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FieldErrorList'
+              example:
+                errors: [ { message: User does not exist proceed to SignUp } ]
+
+  /refreshToken:
+    get:
+      tags: [Auth]
+      operationId: refreshToken
+      summary: Get a new access and refresh token
+      description: 'Send the **refresh token** (not the access token) as `Authorization: Bearer <refreshToken>`.'
+      security:
+        - refreshBearerAuth: []
+      responses:
+        '200':
+          description: New tokens, or `SimpleError` "User does not exist" if the user in the token no longer exists.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/LoginResponse'
+                  - $ref: '#/components/schemas/SimpleError'
+              examples:
+                refreshed:
+                  value: { message: Logged In success, token: eyJhbGciOi..., refreshToken: eyJhbGciOi... }
+                userMissing:
+                  value: { errors: User does not exist }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/MissingToken'
+
+  /activeUser:
+    get:
+      tags: [Users]
+      operationId: getActiveUser
+      summary: Get the signed-in user
+      description: 'Roles: `taskManager`, `taskWorker`.'
+      responses:
+        '200':
+          description: The signed-in user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/DataResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+              example:
+                message: Active User data
+                data: { _id: 65a1f0c2e4b0a1b2c3d4e5f6, username: kofiasante, email: kofi@example.com, role: [taskWorker] }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /updateActiveUser:
+    patch:
+      tags: [Users]
+      operationId: updateActiveUser
+      summary: Change the signed-in user's username
+      description: 'Roles: `taskManager`, `taskWorker`. Only `username` is updated.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: |
+            Updated user. If the update is not acknowledged, the body is the plain JSON string
+            `"Update Active User details failed"` (also HTTP 200).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - allOf:
+                      - $ref: '#/components/schemas/DataResponse'
+                      - type: object
+                        properties:
+                          data:
+                            $ref: '#/components/schemas/User'
+                  - type: string
+                    const: Update Active User details failed
+              example:
+                message: Update Successfull
+                data: { _id: 65a1f0c2e4b0a1b2c3d4e5f6, username: newname, email: kofi@example.com, role: [taskWorker] }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /getAllUsers:
+    get:
+      tags: [Users]
+      operationId: getAllUsers
+      summary: List all users (paginated)
+      description: |
+        Roles: `taskManager`. Newest first. `total` is the total number of users.
+
+        Note: the code returns full user documents here, including the hashed `password`,
+        `createdAt`, `updatedAt` and `__v`.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: One page of users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/DataResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          paginatedData:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/UserDocument'
+                          total:
+                            type: integer
+                            description: Total number of users
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /createTask:
+    post:
+      tags: [Tasks]
+      operationId: createTask
+      summary: Create a task
+      description: 'Roles: `taskManager`. `createdBy` is set to the signed-in user.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '200':
+          description: Task created, or `SimpleError` "User does not exist".
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - allOf:
+                      - $ref: '#/components/schemas/DataResponse'
+                      - type: object
+                        properties:
+                          data:
+                            $ref: '#/components/schemas/Task'
+                  - $ref: '#/components/schemas/SimpleError'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /retrieveAllUserTasks:
+    get:
+      tags: [Tasks]
+      operationId: retrieveAllUserTasks
+      summary: List tasks created by the signed-in user (paginated)
+      description: |
+        Roles: `taskManager`, `taskWorker`. Newest first.
+
+        Note: `total` is the number of tasks **on this page**, not the overall count.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: One page of the user's tasks, or `SimpleError` "User does not exist".
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PaginatedTasksResponse'
+                  - $ref: '#/components/schemas/SimpleError'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /retriveUserTask/{taskId}:
+    get:
+      tags: [Tasks]
+      operationId: retrieveUserTask
+      summary: Get one task by id
+      description: |
+        Roles: `taskManager`, `taskWorker`. `data` is `null` if no task has this id.
+
+        Note: a `taskId` that is not a valid ObjectId returns 400 from the error handler, but the controller then
+        tries to respond a second time (`ERR_HTTP_HEADERS_SENT`), which can reset a kept-alive connection.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: The task, or `SimpleError` "User does not exist".
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - allOf:
+                      - $ref: '#/components/schemas/DataResponse'
+                      - type: object
+                        properties:
+                          data:
+                            oneOf:
+                              - $ref: '#/components/schemas/Task'
+                              - type: 'null'
+                  - $ref: '#/components/schemas/SimpleError'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /retriveAllTasks:
+    get:
+      tags: [Tasks]
+      operationId: retrieveAllTasks
+      summary: List all tasks of all users (paginated)
+      description: 'Roles: `taskManager`. Newest first. `total` is the total number of tasks.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: One page of tasks, or `SimpleError` ("User does not exist" / "Cannot fetch all tasks at moment...").
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PaginatedTasksResponse'
+                  - $ref: '#/components/schemas/SimpleError'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /fiterTaskByStatusDate:
+    get:
+      tags: [Tasks]
+      operationId: filterTasksByStatusDate
+      summary: Filter tasks by status and/or due date
+      description: |
+        Roles: `taskManager`, `taskWorker`.
+
+        The filters are read from a **JSON request body on a GET request**, not from query parameters.
+        Many HTTP clients (including browsers and Swagger UI) do not send a body with GET.
+        Send `""` for a filter you do not want to apply. If both are `""`, all tasks are returned.
+
+        Returned tasks contain only `_id`, `title`, `description`, `dueDate` and `status`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FilterTasksRequest'
+      responses:
+        '200':
+          description: Filtered tasks, or `SimpleError` ("User does not exist" / "Failed to featch filtered user tasks").
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - allOf:
+                      - $ref: '#/components/schemas/DataResponse'
+                      - type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/TaskSummary'
+                  - $ref: '#/components/schemas/SimpleError'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /updateTask/{taskId}:
+    patch:
+      tags: [Tasks]
+      operationId: updateTask
+      summary: Update a task's details
+      description: |
+        Roles: `taskManager`. Updates `title`, `description`, `dueDate` and `status`.
+        Fields you leave out are not changed.
+
+        Notes on the current code:
+        - `description` is written to a misspelled field (`decription`), so it is not actually saved.
+        - `data` in the response is looked up by the user's id instead of the task id, so it is usually `null`.
+        - 400 "Task updated failed" is returned only when no task has this id. Sending unchanged values still returns 200,
+          because `updatedAt` is always modified.
+        - `status` values are not checked against the enum on update.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: Task updated, or `SimpleError` "User does not exist".
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - allOf:
+                      - $ref: '#/components/schemas/DataResponse'
+                      - type: object
+                        properties:
+                          data:
+                            oneOf:
+                              - $ref: '#/components/schemas/Task'
+                              - type: 'null'
+                  - $ref: '#/components/schemas/SimpleError'
+        '400':
+          description: No task with this id, or a validation error (e.g. invalid ObjectId)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SimpleError'
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+              example:
+                errors: Task updated failed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /updateTaskStatus/{taskId}:
+    patch:
+      tags: [Tasks]
+      operationId: updateTaskStatus
+      summary: Update a task's status
+      description: |
+        Roles: `taskManager`, `taskWorker`. Returns 400 "Task status updated failed" only when no task has this id.
+
+        Note: the status is not checked against the enum on update, so any string (e.g. `"DONE"`) is accepted and saved.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskStatusRequest'
+      responses:
+        '200':
+          description: Status updated, or `SimpleError` "User does not exist".
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/MessageResponse'
+                  - $ref: '#/components/schemas/SimpleError'
+              example:
+                message: Task status updated
+        '400':
+          description: No task with this id, or a validation error (e.g. invalid ObjectId)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SimpleError'
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+              example:
+                errors: Task status updated failed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /assignTaskTo/{taskId}:
+    patch:
+      tags: [Tasks]
+      operationId: assignTask
+      summary: Assign a task to a user
+      description: 'Roles: `taskManager`. Sets the task''s `assignedTo` field.'
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignTaskRequest'
+      responses:
+        '200':
+          description: |
+            Task assigned, or `SimpleError` ("User does not exist" / "Failed to assign task to user").
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/MessageResponse'
+                  - $ref: '#/components/schemas/SimpleError'
+              examples:
+                assigned:
+                  value: { message: Task Assigned successfully }
+                failed:
+                  value: { errors: Failed to assign task to user }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /deleteTask/{taskId}:
+    delete:
+      tags: [Tasks]
+      operationId: deleteTask
+      summary: Delete a task
+      description: 'Roles: `taskManager`.'
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Task deleted, or `SimpleError` "User does not exist".
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/MessageResponse'
+                  - $ref: '#/components/schemas/SimpleError'
+              example:
+                message: Task deleted
+        '400':
+          description: No task with this id, or a validation error
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SimpleError'
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+              example:
+                errors: Task deletion failed.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from `POST /login` or `GET /refreshToken`. Valid for 5 hours.
+    refreshBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Refresh token from `POST /login` or `GET /refreshToken`. Valid for 7 hours.
+
+  parameters:
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      description: MongoDB ObjectId of the task
+      schema:
+        $ref: '#/components/schemas/ObjectId'
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Page number, starting at 1
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      description: Number of items per page
+      schema:
+        type: integer
+        minimum: 1
+        default: 5
+
+  responses:
+    ValidationError:
+      description: |
+        Error from the global error handler: Mongoose validation error, duplicate key
+        (e.g. "email already taken"), invalid or expired JWT, or invalid ObjectId.
+        For errors that are not validation or duplicate-key errors, `errors` is an empty array.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+          example:
+            data:
+              errors: [ { message: email already taken } ]
+    MissingToken:
+      description: No token was sent
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SimpleError'
+          example:
+            errors: A token authentication is needed
+    Unauthorized:
+      description: No token was sent ("A token authentication is needed") or the user's role is not allowed ("User not authorized").
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SimpleError'
+          examples:
+            missingToken:
+              value: { errors: A token authentication is needed }
+            wrongRole:
+              value: { errors: User not authorized }
+
+  schemas:
+    ObjectId:
+      type: string
+      pattern: '^[a-fA-F0-9]{24}$'
+      example: 65a1f0c2e4b0a1b2c3d4e5f6
+
+    Role:
+      type: string
+      enum: [taskManager, taskWorker]
+
+    TaskStatus:
+      type: string
+      enum: [PENDING, INPROGRESS, COMPLETED]
+
+    RegisterRequest:
+      type: object
+      required: [username, email, password]
+      properties:
+        username:
+          type: string
+          minLength: 5
+          description: Must be unique
+          example: kofiasante
+        email:
+          type: string
+          format: email
+          description: Must be unique. Stored in lower case.
+          example: kofi@example.com
+        password:
+          type: string
+          minLength: 8
+          description: |
+            Intended rule: at least 8 characters with a digit, a lower-case letter, an upper-case letter and a special character.
+            Not enforced at the moment: the password is hashed before Mongoose validates it, so the rule is checked against the bcrypt hash and any password is accepted.
+          example: Passw0rd!
+        role:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+          default: [taskWorker]
+          description: Optional. Not checked by the register endpoint, so a client can set it.
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: kofi@example.com
+        password:
+          type: string
+          example: Passw0rd!
+
+    LoginResponse:
+      type: object
+      required: [message, token, refreshToken]
+      properties:
+        message:
+          type: string
+          example: Login Successfully
+        token:
+          type: string
+          description: Access token (JWT, 5h). Payload contains `id`, `username` and `userRole`.
+        refreshToken:
+          type: string
+          description: Refresh token (JWT, 7h)
+
+    UpdateUserRequest:
+      type: object
+      required: [username]
+      properties:
+        username:
+          type: string
+          example: newname
+
+    User:
+      type: object
+      description: User as returned by `/activeUser` and `/updateActiveUser` (no password or timestamps)
+      properties:
+        _id:
+          $ref: '#/components/schemas/ObjectId'
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+
+    UserDocument:
+      description: Full user document as returned by `/getAllUsers`
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            password:
+              type: string
+              description: bcrypt hash
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+            __v:
+              type: integer
+
+    CreateTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          example: Prepare sprint report
+        description:
+          type: string
+          example: Summarise the completed stories
+        dueDate:
+          type: string
+          format: date-time
+          example: '2026-12-01T00:00:00.000Z'
+        status:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskStatus'
+          default: [PENDING]
+
+    UpdateTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        dueDate:
+          type: string
+          format: date-time
+        status:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskStatus'
+
+    UpdateTaskStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          oneOf:
+            - $ref: '#/components/schemas/TaskStatus'
+            - type: array
+              items:
+                $ref: '#/components/schemas/TaskStatus'
+          example: INPROGRESS
+
+    AssignTaskRequest:
+      type: object
+      required: [userAssignedTo]
+      properties:
+        userAssignedTo:
+          type: string
+          description: Id of the user the task is assigned to
+          example: 65a1f0c2e4b0a1b2c3d4e5f7
+
+    FilterTasksRequest:
+      type: object
+      required: [status, dueDate]
+      properties:
+        status:
+          description: Status to filter by, or `""` for no status filter
+          oneOf:
+            - $ref: '#/components/schemas/TaskStatus'
+            - type: string
+              const: ''
+        dueDate:
+          type: string
+          description: Due date to filter by (ISO date), or `""` for no date filter
+          example: ''
+
+    Task:
+      type: object
+      properties:
+        _id:
+          $ref: '#/components/schemas/ObjectId'
+        createdBy:
+          $ref: '#/components/schemas/ObjectId'
+        title:
+          type: string
+        description:
+          type: string
+        dueDate:
+          type: string
+          format: date-time
+        status:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskStatus'
+        assignedTo:
+          type: string
+          description: Id of the assigned user, or `""` if not assigned
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        __v:
+          type: integer
+
+    TaskSummary:
+      type: object
+      description: Task with only the fields returned by `/fiterTaskByStatusDate`
+      properties:
+        _id:
+          $ref: '#/components/schemas/ObjectId'
+        title:
+          type: string
+        description:
+          type: string
+        dueDate:
+          type: string
+          format: date-time
+        status:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskStatus'
+
+    PaginatedTasksResponse:
+      allOf:
+        - $ref: '#/components/schemas/DataResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                paginatedData:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Task'
+                total:
+                  type: integer
+
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    DataResponse:
+      type: object
+      required: [message, data]
+      properties:
+        message:
+          type: string
+        data: {}
+
+    SimpleError:
+      type: object
+      required: [errors]
+      properties:
+        errors:
+          type: string
+          example: User does not exist
+
+    FieldErrorList:
+      type: object
+      required: [errors]
+      properties:
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorItem'
+
+    ValidationErrorResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            errors:
+              type: array
+              items:
+                $ref: '#/components/schemas/ErrorItem'
+
+    ErrorItem:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string

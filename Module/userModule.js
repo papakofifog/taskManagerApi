@@ -1,5 +1,6 @@
 const { db, newId, now, validationError } = require('../Settings/database');
 const { validateFieldNotNull, noNullKeyValues } = require('../util/validations/validateModel');
+const { encryptPassword } = require('../util/encryptPassword');
 
 const ROLES = ['taskManager', 'taskWorker'];
 const EMAIL_REGEX = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
@@ -7,10 +8,17 @@ const PASSWORD_REGEX = /^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*()_+{}|:
 
 const isBlank = (value) => typeof value !== 'string' || !validateFieldNotNull(value);
 
-// Turns a DB row into the same shape the API returned with Mongoose.
+// Full user row, including the password hash. Only for internal use (login).
 function toUser(row) {
     if (!row) return null;
     return { ...row, role: JSON.parse(row.role), __v: 0 };
+}
+
+// User row without the password hash, for API responses.
+function toUserWithoutPassword(row) {
+    if (!row) return null;
+    const { password, ...user } = toUser(row);
+    return user;
 }
 
 function toPublicUser(row) {
@@ -41,6 +49,7 @@ function validateUser(user) {
     if (Object.keys(errors).length) throw validationError(errors);
 }
 
+// Validates the user with the plain-text password, then stores a bcrypt hash of the password.
 async function createAUser(user, next) {
     try {
         const timestamp = now();
@@ -54,13 +63,15 @@ async function createAUser(user, next) {
             updatedAt: timestamp,
         };
         validateUser(newUser);
+        newUser.password = await encryptPassword(newUser.password);
 
         db.prepare(`
             INSERT INTO users (_id, username, email, password, role, createdAt, updatedAt)
             VALUES (@_id, @username, @email, @password, @role, @createdAt, @updatedAt)
         `).run({ ...newUser, role: JSON.stringify(newUser.role) });
 
-        return { ...newUser, __v: 0 };
+        const { password, ...createdUser } = newUser;
+        return { ...createdUser, __v: 0 };
     } catch (e) { next(e) }
 }
 
@@ -95,7 +106,7 @@ async function updateUsername(data, next) {
 async function getAllUsers(data, next) {
     try {
         const rows = db.prepare('SELECT * FROM users ORDER BY createdAt DESC, rowid DESC').all();
-        return rows.map(toUser);
+        return rows.map(toUserWithoutPassword);
     } catch (e) {
         return next(e)
     }

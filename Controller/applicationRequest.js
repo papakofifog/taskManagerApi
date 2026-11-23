@@ -1,14 +1,14 @@
 //const passport= require('../Middleware/passport')
 require('dotenv').config();
 const {createAUser, getOneUser, findOneUser, checkRegisterDataformat, checkLoginDataformat, checkIfUserExists}= require('../Module/userModule');
-const {encryptPassword, verifyPassword}= require("../util/encryptPassword");
+const {verifyPassword}= require("../util/encryptPassword");
 const {createToken, createRefreshToken}= require('../Middleware/JWT');
 const {successMessage,successMessageWithData,failureMessage,failureMessageWithData, ErrorMeessage,loginSuccessMessage}= require("../util/manageResponses")
 
 const registerUser= async (req,res,next)=>{
     try{
         if(! (checkRegisterDataformat(req.body, next))) return res.json(failureMessage("All fields required"));
-        req.body.password= await encryptPassword(req.body.password,next);
+        // createAUser validates the plain-text password, then hashes it before storing.
         let newUser= await createAUser(req.body,next)
         if( newUser)return res.json(successMessage("User registered Successfully"))
     }catch(e){

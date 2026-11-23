@@ -48,10 +48,11 @@ async function handleUpdateOneUserTask(req, res, next){
     try{
         let existingUserId=await checkIfUserExists(req.body['id']);
         if(existingUserId === null) return res.json(ErrorMeessage("User does not exist"));
-        let existingUserTask= await getOneUserTask(req.body.id, next);
         req.body.taskId=req.params.taskId;
         let userTask= await updateOneTask(req.body, next);
-        if(userTask) return res.json(successMessageWithData("Task updated", existingUserTask));
+        if(userTask === undefined) return; // error already handled by next(e)
+        let updatedTask= await getOneUserTask(req.params.taskId, next);
+        if(userTask) return res.json(successMessageWithData("Task updated", updatedTask));
         return res.status(400).json(ErrorMeessage("Task updated failed"));
     }catch(e){
         return next(e);

@@ -212,8 +212,7 @@ paths:
       description: |
         Roles: `taskManager`. Newest first. `total` is the total number of users.
 
-        Note: the code returns full user documents here, including the hashed `password`,
-        `createdAt`, `updatedAt` and `__v`.
+        Returns user documents with `createdAt`, `updatedAt` and `__v`. The password hash is never returned.
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
@@ -403,12 +402,12 @@ paths:
         Roles: `taskManager`. Updates `title`, `description`, `dueDate` and `status`.
         Fields you leave out are not changed.
 
-        Notes on the current code:
-        - `description` is written to a misspelled field (`decription`), so it is not actually saved.
-        - `data` in the response is looked up by the user's id instead of the task id, so it is usually `null`.
+        `data` is the task after the update.
+
+        Notes:
         - 400 "Task updated failed" is returned only when no task has this id. Sending unchanged values still returns 200,
           because `updatedAt` is always modified.
-        - `status` values are not checked against the enum on update.
+        - An invalid `status` or `dueDate` returns a 400 validation error.
       parameters:
         - $ref: '#/components/parameters/TaskId'
       requestBody:
@@ -419,7 +418,7 @@ paths:
               $ref: '#/components/schemas/UpdateTaskRequest'
       responses:
         '200':
-          description: Task updated, or `SimpleError` "User does not exist".
+          description: Task updated (`data` is the updated task), or `SimpleError` "User does not exist".
           content:
             application/json:
               schema:
@@ -658,8 +657,8 @@ components:
           type: string
           minLength: 8
           description: |
-            Intended rule: at least 8 characters with a digit, a lower-case letter, an upper-case letter and a special character.
-            Not enforced at the moment: the password is hashed before it is validated, so the rule is checked against the bcrypt hash and any password is accepted.
+            At least 8 characters with a digit, a lower-case letter, an upper-case letter and a special character.
+            Otherwise a 400 validation error is returned ("Password should be at least 8 characters long" or "Password must meet specified criteria").
           example: Passw0rd!
         role:
           type: array
@@ -719,14 +718,11 @@ components:
             $ref: '#/components/schemas/Role'
 
     UserDocument:
-      description: Full user document as returned by `/getAllUsers`
+      description: User document as returned by `/getAllUsers` (no password)
       allOf:
         - $ref: '#/components/schemas/User'
         - type: object
           properties:
-            password:
-              type: string
-              description: bcrypt hash
             createdAt:
               type: string
               format: date-time

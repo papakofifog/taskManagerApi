@@ -13,18 +13,11 @@ function handleValidationErrors(err){
     return errors;
 }
 
-function handleDuplicationValidation(errorCode,keyValue){
-    let message='';
-    let errors=[];
-    switch(errorCode){
-        case 11000:
-            message= `${Object.keys(keyValue)[0]} already taken`
-
-    }
-
-    errors.push({"message":message})
-    return errors;
-
+// e.g. "UNIQUE constraint failed: users.email" -> "email already taken"
+function handleSqliteErrors(err){
+    if(err.code !== 'SQLITE_CONSTRAINT_UNIQUE') return [];
+    const column= err.message.split(':').pop().trim().split('.').pop();
+    return [{"message": `${column} already taken`}];
 }
 
 
@@ -39,8 +32,8 @@ function handleErrors(err,req,res,next){
         case "ValidationError":
             errors=handleValidationErrors(err);
             break;
-        case "MongoServerError":
-            errors=handleDuplicationValidation(err.code, err.keyValue)
+        case "SqliteError":
+            errors=handleSqliteErrors(err)
     }
    return res.status(400).send({
     "data": {

@@ -1,19 +1,8 @@
-const mongoose= require('mongoose');
+const { dbPath } = require('./database');
 
-require('dotenv').config();
+// The SQLite database is opened (and its tables created) when ./database is first required.
+const connectToTaskManagerDB = () => {
+    console.log(`Connected to the SQLite database at ${dbPath}`);
+};
 
-const url="mongodb://127.0.0.1:27017/taskManagerApp";
-
-const connectToTaskManagerDB= async ()=>{
-    try{
-        let dbConnection= await mongoose.connect(url);
-        if(dbConnection){
-            console.log("Connected to the database Successfully");
-            return dbConnection;
-        }
-    }catch(e){
-        next(e)
-    }
-}
-
-module.exports= connectToTaskManagerDB;
+module.exports = connectToTaskManagerDB;
